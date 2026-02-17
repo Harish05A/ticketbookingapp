@@ -9,7 +9,9 @@ import {
   runTransaction,
   increment,
   query,
-  where
+  where,
+  deleteDoc,
+  limit
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { 
   signInWithEmailAndPassword, 
@@ -46,9 +48,32 @@ export const apiClient = {
     return withRetry(async () => {
       const userCredential = await signInWithEmailAndPassword(auth, credentials.email, credentials.password);
       const firebaseUser = userCredential.user;
+      
       const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
-      const userData = userDoc.exists() ? userDoc.data() : {};
+      
+      if (!userDoc.exists()) {
+        // Check if this is a pending theater admin
+        const q = query(collection(db, "pending_admins"), where("email", "==", firebaseUser.email), limit(1));
+        const pendingSnap = await getDocs(q);
+        
+        if (!pendingSnap.empty) {
+          const pendingData = pendingSnap.docs[0].data();
+          return {
+            token: await firebaseUser.getIdToken(),
+            user: { 
+              id: firebaseUser.uid, 
+              email: firebaseUser.email,
+              needsOnboarding: true,
+              pendingTheater: {
+                id: pendingData.theaterId,
+                name: pendingData.theaterName
+              }
+            }
+          };
+        }
+      }
 
+      const userData = userDoc.exists() ? userDoc.data() : {};
       return { 
         token: await firebaseUser.getIdToken(), 
         user: { 
@@ -61,6 +86,29 @@ export const apiClient = {
           managedTheater: userData.managedTheater || null
         } 
       };
+    });
+  },
+
+  completeTheaterOnboarding: async (userId: string, username: string, theaterData: any) => {
+    return withRetry(async () => {
+      const newUserProfile = {
+        username,
+        email: auth.currentUser?.email,
+        is_staff: true,
+        is_superuser: false,
+        fines: 0,
+        managedTheater: theaterData,
+        createdAt: Date.now()
+      };
+      
+      await setDoc(doc(db, "users", userId), newUserProfile);
+      
+      // Cleanup pending_admins
+      const q = query(collection(db, "pending_admins"), where("email", "==", auth.currentUser?.email));
+      const snap = await getDocs(q);
+      snap.forEach(async (d) => await deleteDoc(d.ref));
+
+      return newUserProfile;
     });
   },
 
@@ -98,7 +146,6 @@ export const apiClient = {
 
   getShows: async (movieId?: string): Promise<Show[]> => {
     return withRetry(async () => {
-      // Fix: un-commented and corrected query logic for movieId filtering
       let q = collection(db, "shows") as any;
       if (movieId) {
         q = query(collection(db, "shows"), where("movieId", "==", movieId));
@@ -204,7 +251,6 @@ export const apiClient = {
     const showRef = doc(db, "shows", bookingData.showId);
     const requestedSeats = bookingData.seats.split(',');
 
-    // 1. Transactional check and Firestore update (for real-time consistency)
     await runTransaction(db, async (transaction) => {
       const showDoc = await transaction.get(showRef);
       if (!showDoc.exists()) throw new Error("Show not found.");
@@ -220,7 +266,6 @@ export const apiClient = {
       transaction.update(showRef, { seats: updatedSeats });
     });
 
-    // 2. Django / Razorpay Bridge
     const response = await fetch(`${DJANGO_API_BASE}/bookings/`, {
       method: 'POST',
       headers: { 
@@ -231,7 +276,6 @@ export const apiClient = {
     });
 
     if (!response.ok) {
-       // Rollback in Firestore if backend fails (Simplified)
        throw new Error("Payment gateway connection failed.");
     }
 
@@ -259,10 +303,9 @@ export const apiClient = {
     return { id: docRef.id, ...showData };
   },
 
-  // Fix: added missing createTheaterAdmin method to support AdminDashboard functionality
   createTheaterAdmin: async (adminData: any) => {
     return withRetry(async () => {
-      // 1. Create the theater resource
+      // 1. Initialize Theater in Firestore
       const theaterRef = await addDoc(collection(db, "theaters"), {
         name: adminData.theaterName,
         city: adminData.city,
@@ -270,11 +313,12 @@ export const apiClient = {
         layout: adminData.layout
       });
 
-      // 2. Create entry in pending_admins to trigger the background user provisioning function
+      // 2. Log in pending_admins - This will trigger the Cloud Function
+      // which handles the Firebase Auth account creation.
       await addDoc(collection(db, "pending_admins"), {
-        username: adminData.username,
         email: adminData.email,
         password: adminData.password,
+        username: adminData.username, // Initial suggested username
         theaterId: theaterRef.id,
         theaterName: adminData.theaterName,
         createdAt: Date.now()

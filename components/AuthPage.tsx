@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LogIn, ArrowRight, ShieldCheck, Mail, Lock, User, Key, Building2 } from 'lucide-react';
+import { LogIn, ArrowRight, ShieldCheck, Mail, Lock, User, Key, Building2, CheckCircle } from 'lucide-react';
 import { apiClient } from '../services/api';
 
 interface AuthPageProps {
@@ -11,6 +11,9 @@ interface AuthPageProps {
 const AuthPage: React.FC<AuthPageProps> = ({ onLogin }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [isStaffMode, setIsStaffMode] = useState(false);
+  const [onboardingUser, setOnboardingUser] = useState<any>(null);
+  const [onboardingUsername, setOnboardingUsername] = useState('');
+  
   const [formData, setFormData] = useState({ username: '', email: '', password: '', adminKey: '' });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -24,6 +27,13 @@ const AuthPage: React.FC<AuthPageProps> = ({ onLogin }) => {
     try {
       if (isLogin) {
         const data = await apiClient.login({ email: formData.email, password: formData.password });
+        
+        if (data.user.needsOnboarding) {
+          setOnboardingUser(data.user);
+          setIsLoading(false);
+          return;
+        }
+
         if (isStaffMode && !data.user.is_staff && !data.user.is_superuser) {
           throw new Error("Administrative access required.");
         }
@@ -39,6 +49,64 @@ const AuthPage: React.FC<AuthPageProps> = ({ onLogin }) => {
       setIsLoading(false);
     }
   };
+
+  const handleCompleteOnboarding = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onboardingUsername) return;
+    
+    setIsLoading(true);
+    try {
+      const finalProfile = await apiClient.completeTheaterOnboarding(
+        onboardingUser.id,
+        onboardingUsername,
+        onboardingUser.pendingTheater
+      );
+      const token = await (apiClient as any).auth?.currentUser?.getIdToken();
+      onLogin(finalProfile, token);
+      navigate('/admin');
+    } catch (err: any) {
+      setError(err.message || "Failed to finalize profile.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (onboardingUser) {
+    return (
+      <div className="min-h-[70vh] flex items-center justify-center p-4">
+        <div className="w-full max-w-sm bg-slate-900 border border-slate-800 p-8 rounded-2xl shadow-xl">
+          <div className="text-center mb-8">
+            <div className="w-14 h-14 bg-emerald-600 rounded-xl flex items-center justify-center mx-auto mb-4">
+              <Building2 className="text-white w-6 h-6" />
+            </div>
+            <h2 className="text-xl font-bold text-white">Setup Your Profile</h2>
+            <p className="text-slate-500 text-xs mt-1">Welcome to {onboardingUser.pendingTheater.name}</p>
+          </div>
+
+          <div className="bg-emerald-500/10 border border-emerald-500/20 p-4 rounded-xl mb-6">
+            <p className="text-[10px] font-black uppercase text-emerald-500 tracking-widest mb-1">Assigned Venue</p>
+            <p className="text-white text-sm font-bold">{onboardingUser.pendingTheater.name}</p>
+          </div>
+
+          <form onSubmit={handleCompleteOnboarding} className="space-y-4">
+            <AuthInput 
+              icon={<User className="w-4 h-4" />} 
+              placeholder="Choose Management Username" 
+              value={onboardingUsername} 
+              onChange={setOnboardingUsername} 
+            />
+            <button
+              type="submit"
+              disabled={isLoading || !onboardingUsername}
+              className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 rounded-lg font-bold text-sm flex items-center justify-center gap-2 text-white transition-all disabled:opacity-50"
+            >
+              {isLoading ? <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" /> : <>Finalize Account <CheckCircle className="w-4 h-4" /></>}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-[70vh] flex items-center justify-center p-4">
