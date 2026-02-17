@@ -7,6 +7,7 @@ import {
   setDoc, 
   addDoc, 
   runTransaction,
+  increment
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { 
   signInWithEmailAndPassword, 
@@ -16,14 +17,12 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 import { db, auth, firebaseConfig } from './firebase';
-import { Movie, Theater, Show, Booking, BookingStatus, SeatState } from '../types';
+import { Movie, Theater, Show, Booking, BookingStatus, SeatState, User } from '../types';
 import { INITIAL_MOVIES, INITIAL_SHOWS, INITIAL_THEATERS, generateSeats } from '../constants';
 
 const ADMIN_SECRET = "CINEQUEST_MASTER_2025";
 const SEAT_HOLD_DURATION_MS = 5 * 60 * 1000;
-
-// Base API URL for Django Backend
-const API_BASE = window.location.origin + '/api';
+const ABANDON_FINE_AMOUNT = 5;
 
 const secondaryApp = initializeApp(firebaseConfig, "SecondaryAuthHandler");
 const secondaryAuth = getAuth(secondaryApp);
@@ -40,7 +39,6 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 3, delay = 500): Pro
 }
 
 export const apiClient = {
-  // Authentication via Firebase Auth
   login: async (credentials: any) => {
     return withRetry(async () => {
       const userCredential = await signInWithEmailAndPassword(auth, credentials.email, credentials.password);
@@ -56,6 +54,7 @@ export const apiClient = {
           email: firebaseUser.email, 
           is_staff: userData.is_staff || false, 
           is_superuser: userData.is_superuser || false,
+          fines: userData.fines || 0,
           managedTheater: userData.managedTheater || null
         } 
       };
@@ -72,6 +71,7 @@ export const apiClient = {
         email: userData.email,
         is_staff: isMaster,
         is_superuser: isMaster,
+        fines: 0,
         createdAt: Date.now()
       };
       await setDoc(doc(db, "users", firebaseUser.uid), newUserMetadata);
@@ -86,7 +86,6 @@ export const apiClient = {
     await signOut(auth);
   },
 
-  // Real-time Content via Firestore
   getMovies: async (): Promise<Movie[]> => {
     return withRetry(async () => {
       const snap = await getDocs(collection(db, "movies"));
@@ -116,30 +115,6 @@ export const apiClient = {
     });
   },
 
-  // Content Management
-  addMovie: async (movieData: any) => {
-    const docRef = await addDoc(collection(db, "movies"), movieData);
-    return { id: docRef.id, ...movieData };
-  },
-
-  addShow: async (showData: { movieId: string, theaterId: string, time: string, price: number }) => {
-    const theaterDoc = await getDoc(doc(db, "theaters", showData.theaterId));
-    let layout = { rows: ['A', 'B', 'C', 'D', 'E'], cols: 5 };
-    
-    if (theaterDoc.exists()) {
-      const tData = theaterDoc.data() as Theater;
-      if (tData.layout) layout = tData.layout;
-    }
-
-    const docRef = await addDoc(collection(db, "shows"), {
-      ...showData,
-      seats: generateSeats(layout.rows, layout.cols),
-      theater_name: theaterDoc.exists() ? (theaterDoc.data() as Theater).name : 'Cinema'
-    });
-    return { id: docRef.id, ...showData };
-  },
-
-  // Real-time Seat Locking (Crucial Business Logic)
   cleanupExpiredHolds: async (showId: string) => {
     const showRef = doc(db, "shows", showId);
     return await runTransaction(db, async (transaction) => {
@@ -149,13 +124,24 @@ export const apiClient = {
       const now = Date.now();
       let hasChanges = false;
       const updatedSeats = { ...seats };
+      const usersToFine: Set<string> = new Set();
+
       Object.entries(seats).forEach(([id, seat]) => {
         if (typeof seat === 'object' && seat.status === 'held' && seat.expiresAt < now) {
+          if (seat.heldBy) usersToFine.add(seat.heldBy);
           updatedSeats[id] = 'available';
           hasChanges = true;
         }
       });
-      if (hasChanges) transaction.update(showRef, { seats: updatedSeats });
+
+      if (hasChanges) {
+        transaction.update(showRef, { seats: updatedSeats });
+        // Apply fines to users who abandoned holds
+        for (const uId of usersToFine) {
+          const userRef = doc(db, "users", uId);
+          transaction.update(userRef, { fines: increment(ABANDON_FINE_AMOUNT) });
+        }
+      }
       return hasChanges;
     });
   },
@@ -167,6 +153,7 @@ export const apiClient = {
       if (!showDoc.exists()) throw new Error("Show not found.");
       const seats = showDoc.data().seats as Record<string, SeatState>;
       const now = Date.now();
+      
       for (const id of seatIds) {
         const seat = seats[id];
         if (seat === 'booked') throw new Error(`Seat ${id} was just booked.`);
@@ -174,6 +161,7 @@ export const apiClient = {
           if (seat.heldBy !== userId && seat.expiresAt > now) throw new Error(`Seat ${id} is currently held by someone else.`);
         }
       }
+      
       const updatedSeats = { ...seats };
       const expiresAt = now + SEAT_HOLD_DURATION_MS;
       seatIds.forEach(id => {
@@ -192,6 +180,7 @@ export const apiClient = {
       const seats = showDoc.data().seats as Record<string, SeatState>;
       const updatedSeats = { ...seats };
       let hasChanges = false;
+      
       seatIds.forEach(id => {
         const seat = seats[id];
         if (typeof seat === 'object' && seat.status === 'held' && seat.heldBy === userId) {
@@ -199,11 +188,11 @@ export const apiClient = {
           hasChanges = true;
         }
       });
+      
       if (hasChanges) transaction.update(showRef, { seats: updatedSeats });
     });
   },
 
-  // Final Booking Logic
   createBooking: async (bookingData: any) => {
     const showRef = doc(db, "shows", bookingData.showId);
     const bookingsCol = collection(db, "bookings");
@@ -238,6 +227,28 @@ export const apiClient = {
     });
   },
 
+  addMovie: async (movieData: any) => {
+    const docRef = await addDoc(collection(db, "movies"), movieData);
+    return { id: docRef.id, ...movieData };
+  },
+
+  addShow: async (showData: { movieId: string, theaterId: string, time: string, price: number }) => {
+    const theaterDoc = await getDoc(doc(db, "theaters", showData.theaterId));
+    let layout = { rows: ['A', 'B', 'C', 'D', 'E'], cols: 5 };
+    
+    if (theaterDoc.exists()) {
+      const tData = theaterDoc.data() as Theater;
+      if (tData.layout) layout = tData.layout;
+    }
+
+    const docRef = await addDoc(collection(db, "shows"), {
+      ...showData,
+      seats: generateSeats(layout.rows, layout.cols),
+      theater_name: theaterDoc.exists() ? (theaterDoc.data() as Theater).name : 'Cinema'
+    });
+    return { id: docRef.id, ...showData };
+  },
+
   createTheaterAdmin: async (adminData: any) => {
     const theaterRef = await addDoc(collection(db, "theaters"), {
       name: adminData.theaterName,
@@ -255,6 +266,7 @@ export const apiClient = {
         email: adminData.email,
         is_staff: true,
         is_superuser: false,
+        fines: 0,
         managedTheater: {
           id: theaterRef.id,
           name: adminData.theaterName

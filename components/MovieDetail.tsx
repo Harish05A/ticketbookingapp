@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Clock, Calendar, Star, MapPin, ShieldCheck, ChevronRight, Info, LogIn, AlertCircle, Timer } from 'lucide-react';
+import { Clock, Calendar, Star, MapPin, ShieldCheck, ChevronRight, Info, LogIn, AlertCircle, Timer, AlertTriangle } from 'lucide-react';
 import { doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { db } from '../services/firebase';
 import { Movie, Show, Theater, Booking, SeatState } from '../types';
@@ -50,6 +50,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movies, shows, theaters, onBo
       return;
     }
 
+    // Trigger cleanup when anyone views the show
     apiClient.cleanupExpiredHolds(selectedShowId).catch(console.error);
 
     const unsub = onSnapshot(doc(db, "shows", selectedShowId), (docSnap) => {
@@ -82,7 +83,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movies, shows, theaters, onBo
       setTimeLeft(remaining);
       if (remaining === 0) {
         setHoldExpiry(null);
-        setError("Seat reservation expired.");
+        setError("Reservation expired! ₹5 fine added to your account for abandoned seats.");
         setSelectedSeats([]);
       }
     }, 1000);
@@ -160,7 +161,6 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movies, shows, theaters, onBo
 
   return (
     <div className="pb-16">
-      {/* Banner */}
       <div className="relative h-[300px] overflow-hidden bg-slate-900">
         <img src={movie.poster} className="w-full h-full object-cover opacity-20 blur-xl scale-110" alt="" />
         <div className="absolute inset-0 bg-gradient-to-t from-slate-950 to-transparent" />
@@ -184,7 +184,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movies, shows, theaters, onBo
       <div className="max-w-7xl mx-auto px-4 py-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-8">
           {error && (
-            <div className="bg-rose-500/10 border border-rose-500/30 p-4 rounded-lg text-rose-500 flex items-center gap-3">
+            <div className="bg-rose-500/10 border border-rose-500/30 p-4 rounded-lg text-rose-500 flex items-center gap-3 animate-pulse">
               <AlertCircle className="w-5 h-5" />
               <p className="text-sm font-bold">{error}</p>
             </div>
@@ -232,7 +232,7 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movies, shows, theaters, onBo
           </section>
 
           {liveShow && (
-            <section className="bg-slate-900 p-8 md:p-12 rounded-2xl border border-slate-800 shadow-xl">
+            <section className="bg-slate-900 p-8 md:p-12 rounded-2xl border border-slate-800 shadow-xl relative overflow-hidden">
               <div className="flex justify-center mb-12">
                 <div className="w-full max-w-sm">
                   <div className="h-1.5 bg-slate-800 rounded-full" />
@@ -248,7 +248,19 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movies, shows, theaters, onBo
               <div className="mt-12 flex flex-wrap justify-center gap-6 border-t border-slate-800 pt-8">
                 <Legend color="bg-slate-800 border-slate-700" label="Available" />
                 <Legend color="bg-rose-600" label="Selected" />
-                <Legend color="bg-slate-700/30 border-slate-800 opacity-20" label="Reserved" />
+                <Legend color="bg-amber-500/20 border-amber-500/40" label="Reserved" />
+                <Legend color="bg-slate-700/30 border-slate-800 opacity-20" label="Sold Out" />
+              </div>
+
+              {/* Reservation Policy Note */}
+              <div className="mt-8 p-4 bg-amber-500/5 border border-amber-500/10 rounded-xl flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                <div>
+                   <p className="text-[10px] font-black uppercase text-amber-500 tracking-widest mb-1">Reservation Commitment Policy</p>
+                   <p className="text-slate-500 text-xs leading-relaxed">
+                     Seats are held for <span className="text-slate-300 font-bold">5 minutes</span>. If you abandon a reservation or the timer expires, a <span className="text-amber-500 font-bold">₹5 penalty fine</span> will be applied to your account.
+                   </p>
+                </div>
               </div>
             </section>
           )}
@@ -258,8 +270,8 @@ const MovieDetail: React.FC<MovieDetailProps> = ({ movies, shows, theaters, onBo
           <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 sticky top-20 shadow-xl">
              {timeLeft > 0 && (
                 <div className="mb-6 flex items-center justify-between bg-amber-500/10 text-amber-500 px-3 py-2 rounded-lg text-[10px] font-bold uppercase">
-                   <div className="flex items-center gap-2"><Timer className="w-3 h-3" /> Reservation Time</div>
-                   <span>{Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}</span>
+                   <div className="flex items-center gap-2"><Timer className="w-3 h-3" /> Time Remaining</div>
+                   <span className="font-mono text-sm">{Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}</span>
                 </div>
              )}
             <h3 className="text-lg font-bold mb-6 flex items-center gap-2 text-white">

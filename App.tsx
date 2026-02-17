@@ -9,12 +9,13 @@ import {
   Menu,
   X,
   LogOut,
-  LogIn
+  LogIn,
+  AlertTriangle
 } from 'lucide-react';
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { doc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { auth, db } from './services/firebase';
-import { Movie, Show, Booking, Theater } from './types';
+import { Movie, Show, Booking, Theater, User } from './types';
 import MovieDetail from './components/MovieDetail';
 import AdminDashboard from './components/AdminDashboard';
 import BookingSuccess from './components/BookingSuccess';
@@ -27,29 +28,32 @@ const App: React.FC = () => {
   const [shows, setShows] = useState<Show[]>([]);
   const [theaters, setTheaters] = useState<Theater[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
-  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    let unsubscribeUser: () => void = () => {};
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
-        try {
-          const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
-          const userData = userDoc.exists() ? userDoc.data() : {};
-          const combinedUser = { 
-            id: firebaseUser.uid, 
-            username: userData.username || firebaseUser.displayName || firebaseUser.email?.split('@')[0], 
-            email: firebaseUser.email, 
-            is_staff: userData.is_staff || false,
-            is_superuser: userData.is_superuser || false,
-            managedTheater: userData.managedTheater || null
-          };
-          setCurrentUser(combinedUser);
-          localStorage.setItem('cinequest_user', JSON.stringify(combinedUser));
-        } catch (err) {
-          console.error("Error fetching user data", err);
-        }
+        // Listen to real-time user document changes for fines
+        unsubscribeUser = onSnapshot(doc(db, "users", firebaseUser.uid), (docSnap) => {
+          if (docSnap.exists()) {
+            const userData = docSnap.data();
+            const combinedUser: User = { 
+              id: firebaseUser.uid, 
+              username: userData.username || firebaseUser.displayName || firebaseUser.email?.split('@')[0], 
+              email: firebaseUser.email || '', 
+              is_staff: userData.is_staff || false,
+              is_superuser: userData.is_superuser || false,
+              fines: userData.fines || 0,
+              managedTheater: userData.managedTheater || null
+            };
+            setCurrentUser(combinedUser);
+            localStorage.setItem('cinequest_user', JSON.stringify(combinedUser));
+          }
+        });
       } else {
         setCurrentUser(null);
         localStorage.removeItem('cinequest_user');
@@ -76,7 +80,10 @@ const App: React.FC = () => {
     };
     fetchData();
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribeAuth();
+      unsubscribeUser();
+    };
   }, []);
 
   const handleLogin = (userData: any, token: string) => {
@@ -130,7 +137,14 @@ const App: React.FC = () => {
                 {currentUser ? (
                   <div className="flex items-center gap-4 pl-4 border-l border-slate-700">
                     <div className="text-right">
-                      <p className="text-sm font-bold text-white leading-none">{currentUser.username}</p>
+                      <div className="flex items-center gap-2 justify-end">
+                        {currentUser.fines > 0 && (
+                          <span className="flex items-center gap-1 bg-amber-500/20 text-amber-500 px-2 py-0.5 rounded text-[9px] font-black uppercase">
+                            <AlertTriangle className="w-3 h-3" /> ₹{currentUser.fines} Fine
+                          </span>
+                        )}
+                        <p className="text-sm font-bold text-white leading-none">{currentUser.username}</p>
+                      </div>
                       <p className="text-[10px] text-slate-500 uppercase tracking-widest">{currentUser.is_staff ? 'Administrator' : 'Movie Buff'}</p>
                     </div>
                     <button onClick={handleLogout} className="p-2 bg-slate-800 rounded-full text-slate-300 hover:text-rose-500 transition-colors">
