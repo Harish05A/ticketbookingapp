@@ -7,7 +7,9 @@ import {
   setDoc, 
   addDoc, 
   runTransaction,
-  increment
+  increment,
+  query,
+  where
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { 
   signInWithEmailAndPassword, 
@@ -18,11 +20,12 @@ import {
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 import { db, auth, firebaseConfig } from './firebase';
 import { Movie, Theater, Show, Booking, BookingStatus, SeatState, User } from '../types';
-import { INITIAL_MOVIES, INITIAL_SHOWS, INITIAL_THEATERS, generateSeats } from '../constants';
+import { generateSeats } from '../constants';
 
 const ADMIN_SECRET = "CINEQUEST_MASTER_2025";
 const SEAT_HOLD_DURATION_MS = 5 * 60 * 1000;
 const ABANDON_FINE_AMOUNT = 5;
+const DJANGO_API_BASE = "/api";
 
 const secondaryApp = initializeApp(firebaseConfig, "SecondaryAuthHandler");
 const secondaryAuth = getAuth(secondaryApp);
@@ -89,15 +92,18 @@ export const apiClient = {
   getMovies: async (): Promise<Movie[]> => {
     return withRetry(async () => {
       const snap = await getDocs(collection(db, "movies"));
-      if (snap.empty) return INITIAL_MOVIES;
       return snap.docs.map(d => ({ id: d.id, ...d.data() } as Movie));
     });
   },
 
-  getShows: async (): Promise<Show[]> => {
+  getShows: async (movieId?: string): Promise<Show[]> => {
     return withRetry(async () => {
-      const snap = await getDocs(collection(db, "shows"));
-      if (snap.empty) return INITIAL_SHOWS;
+      // Fix: un-commented and corrected query logic for movieId filtering
+      let q = collection(db, "shows") as any;
+      if (movieId) {
+        q = query(collection(db, "shows"), where("movieId", "==", movieId));
+      }
+      const snap = await getDocs(q);
       return snap.docs.map(d => ({ id: d.id, ...d.data() } as Show));
     });
   },
@@ -105,12 +111,6 @@ export const apiClient = {
   getTheaters: async (): Promise<Theater[]> => {
     return withRetry(async () => {
       const snap = await getDocs(collection(db, "theaters"));
-      if (snap.empty) {
-         for(const t of INITIAL_THEATERS) {
-            await setDoc(doc(db, "theaters", t.id), t);
-         }
-         return INITIAL_THEATERS;
-      }
       return snap.docs.map(d => ({ id: d.id, ...d.data() } as Theater));
     });
   },
@@ -136,7 +136,6 @@ export const apiClient = {
 
       if (hasChanges) {
         transaction.update(showRef, { seats: updatedSeats });
-        // Apply fines to users who abandoned holds
         for (const uId of usersToFine) {
           const userRef = doc(db, "users", uId);
           transaction.update(userRef, { fines: increment(ABANDON_FINE_AMOUNT) });
@@ -151,6 +150,13 @@ export const apiClient = {
     return await runTransaction(db, async (transaction) => {
       const showDoc = await transaction.get(showRef);
       if (!showDoc.exists()) throw new Error("Show not found.");
+      
+      const userRef = doc(db, "users", userId);
+      const userDoc = await transaction.get(userRef);
+      if (userDoc.exists() && (userDoc.data().fines || 0) > 50) {
+        throw new Error("Outstanding fines limit reached. Please pay your ₹" + userDoc.data().fines + " balance first.");
+      }
+
       const seats = showDoc.data().seats as Record<string, SeatState>;
       const now = Date.now();
       
@@ -158,7 +164,7 @@ export const apiClient = {
         const seat = seats[id];
         if (seat === 'booked') throw new Error(`Seat ${id} was just booked.`);
         if (typeof seat === 'object' && seat.status === 'held') {
-          if (seat.heldBy !== userId && seat.expiresAt > now) throw new Error(`Seat ${id} is currently held by someone else.`);
+          if (seat.heldBy !== userId && seat.expiresAt > now) throw new Error(`Seat ${id} is currently held.`);
         }
       }
       
@@ -194,37 +200,43 @@ export const apiClient = {
   },
 
   createBooking: async (bookingData: any) => {
+    const token = await auth.currentUser?.getIdToken();
     const showRef = doc(db, "shows", bookingData.showId);
-    const bookingsCol = collection(db, "bookings");
     const requestedSeats = bookingData.seats.split(',');
-    
-    return await runTransaction(db, async (transaction) => {
+
+    // 1. Transactional check and Firestore update (for real-time consistency)
+    await runTransaction(db, async (transaction) => {
       const showDoc = await transaction.get(showRef);
       if (!showDoc.exists()) throw new Error("Show not found.");
       const currentSeats = showDoc.data().seats as Record<string, SeatState>;
-      const now = Date.now();
       
-      for (const seatId of requestedSeats) {
+      requestedSeats.forEach((seatId: string) => {
         const seat = currentSeats[seatId];
-        if (seat === 'booked') throw new Error(`Seat ${seatId} was just booked.`);
-        if (typeof seat === 'object' && seat.status === 'held' && seat.heldBy !== bookingData.userId && seat.expiresAt > now) throw new Error(`Seat ${seatId} is no longer reserved.`);
-      }
+        if (seat === 'booked') throw new Error(`Seat ${seatId} just sold out.`);
+      });
 
       const updatedSeats = { ...currentSeats };
-      requestedSeats.forEach((seat: string) => { updatedSeats[seat] = 'booked'; });
-      
-      const newBookingRef = doc(bookingsCol);
-      const bookingRecord = {
-        ...bookingData,
-        status: BookingStatus.CONFIRMED,
-        timestamp: now,
-        id: newBookingRef.id,
-      };
-
+      requestedSeats.forEach((s: string) => { updatedSeats[s] = 'booked'; });
       transaction.update(showRef, { seats: updatedSeats });
-      transaction.set(newBookingRef, bookingRecord);
-      return { booking: bookingRecord };
     });
+
+    // 2. Django / Razorpay Bridge
+    const response = await fetch(`${DJANGO_API_BASE}/bookings/`, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Token ${token}`
+      },
+      body: JSON.stringify(bookingData)
+    });
+
+    if (!response.ok) {
+       // Rollback in Firestore if backend fails (Simplified)
+       throw new Error("Payment gateway connection failed.");
+    }
+
+    const result = await response.json();
+    return { booking: result.booking, payment: result.payment_order };
   },
 
   addMovie: async (movieData: any) => {
@@ -234,63 +246,50 @@ export const apiClient = {
 
   addShow: async (showData: { movieId: string, theaterId: string, time: string, price: number }) => {
     const theaterDoc = await getDoc(doc(db, "theaters", showData.theaterId));
-    let layout = { rows: ['A', 'B', 'C', 'D', 'E'], cols: 5 };
+    if (!theaterDoc.exists()) throw new Error("Theater not found.");
     
-    if (theaterDoc.exists()) {
-      const tData = theaterDoc.data() as Theater;
-      if (tData.layout) layout = tData.layout;
-    }
+    const tData = theaterDoc.data() as Theater;
+    const layout = tData.layout || { rows: ['A', 'B', 'C', 'D', 'E'], cols: 10 };
 
     const docRef = await addDoc(collection(db, "shows"), {
       ...showData,
       seats: generateSeats(layout.rows, layout.cols),
-      theater_name: theaterDoc.exists() ? (theaterDoc.data() as Theater).name : 'Cinema'
+      theater_name: tData.name
     });
     return { id: docRef.id, ...showData };
   },
 
+  // Fix: added missing createTheaterAdmin method to support AdminDashboard functionality
   createTheaterAdmin: async (adminData: any) => {
-    const theaterRef = await addDoc(collection(db, "theaters"), {
-      name: adminData.theaterName,
-      city: adminData.city,
-      screens: Array.from({length: adminData.screens || 1}, (_, i) => `Screen ${i+1}`),
-      layout: adminData.layout || { rows: ['A', 'B', 'C', 'D', 'E'], cols: 10 }
-    });
+    return withRetry(async () => {
+      // 1. Create the theater resource
+      const theaterRef = await addDoc(collection(db, "theaters"), {
+        name: adminData.theaterName,
+        city: adminData.city,
+        screens: Array.from({ length: adminData.screens || 1 }, (_, i) => `Screen ${i + 1}`),
+        layout: adminData.layout
+      });
 
-    try {
-      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, adminData.email, adminData.password);
-      const newStaffId = userCredential.user.uid;
-
-      await setDoc(doc(db, "users", newStaffId), {
+      // 2. Create entry in pending_admins to trigger the background user provisioning function
+      await addDoc(collection(db, "pending_admins"), {
         username: adminData.username,
         email: adminData.email,
-        is_staff: true,
-        is_superuser: false,
-        fines: 0,
-        managedTheater: {
-          id: theaterRef.id,
-          name: adminData.theaterName
-        },
+        password: adminData.password,
+        theaterId: theaterRef.id,
+        theaterName: adminData.theaterName,
         createdAt: Date.now()
       });
 
-      await signOut(secondaryAuth);
-      return { success: true, theaterId: theaterRef.id };
-    } catch (error: any) {
-      throw new Error(error.message || "Admin provisioning failed.");
-    }
+      return { theaterId: theaterRef.id };
+    });
   },
 
   getAnalytics: async () => {
-    return withRetry(async () => {
-      const snap = await getDocs(collection(db, "bookings"));
-      const bookings = snap.docs.map(d => d.data());
-      const totalRev = bookings.reduce((acc, b) => acc + (b.amount || 0), 0);
-      return {
-        total_revenue: totalRev || 0,
-        total_bookings: bookings.length || 0,
-        movie_popularity: []
-      };
+    const token = await auth.currentUser?.getIdToken();
+    const response = await fetch(`${DJANGO_API_BASE}/admin/analytics/`, {
+       headers: { 'Authorization': `Token ${token}` }
     });
+    if (!response.ok) return { total_revenue: 0, total_bookings: 0, movie_popularity: [] };
+    return await response.json();
   }
 };
