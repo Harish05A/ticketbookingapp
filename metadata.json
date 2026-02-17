@@ -1,0 +1,7 @@
+{
+  "name": "CineQuest - Premium Movie Ticket Booking",
+  "description": "A feature-rich movie booking management system with real-time seat tracking, AI-powered descriptions, and interactive admin analytics.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
