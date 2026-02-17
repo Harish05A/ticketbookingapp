@@ -6,9 +6,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CineQuest | Movie Ticket Booking</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Noto+Sans+Devanagari:wght@400;700&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Inter', sans-serif; }
+        body { 
+            font-family: 'Inter', 'Noto Sans Devanagari', sans-serif; 
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        @keyframes pulse-red {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .animate-pulse-red { animation: pulse-red 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
     </style>
 <script type="importmap">
 {
@@ -19,12 +30,15 @@
     "recharts": "https://esm.sh/recharts@^3.7.0",
     "react/": "https://esm.sh/react@^19.2.4/",
     "react": "https://esm.sh/react@^19.2.4",
-    "react-router-dom": "https://esm.sh/react-router-dom@^7.13.0"
+    "react-router-dom": "https://esm.sh/react-router-dom@^7.13.0",
+    "firebase-functions": "https://esm.sh/firebase-functions@^7.0.5",
+    "firebase-admin": "https://esm.sh/firebase-admin@^13.6.1",
+    "firebase-functions/": "https://esm.sh/firebase-functions@^7.0.5/"
   }
 }
 </script>
 </head>
-<body class="bg-slate-950 text-slate-100">
+<body class="bg-slate-950 text-slate-100 overflow-x-hidden">
     <div id="root"></div>
 </body>
 </html>

@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LogIn, ArrowRight, ShieldCheck, Mail, Lock, User, Key } from 'lucide-react';
+import { LogIn, ArrowRight, ShieldCheck, Mail, Lock, User, Key, Building2 } from 'lucide-react';
 import { apiClient } from '../services/api';
 
 interface AuthPageProps {
@@ -10,7 +10,7 @@ interface AuthPageProps {
 
 const AuthPage: React.FC<AuthPageProps> = ({ onLogin }) => {
   const [isLogin, setIsLogin] = useState(true);
-  const [isAdminMode, setIsAdminMode] = useState(false);
+  const [isStaffMode, setIsStaffMode] = useState(false);
   const [formData, setFormData] = useState({ username: '', email: '', password: '', adminKey: '' });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -24,6 +24,9 @@ const AuthPage: React.FC<AuthPageProps> = ({ onLogin }) => {
     try {
       if (isLogin) {
         const data = await apiClient.login({ email: formData.email, password: formData.password });
+        if (isStaffMode && !data.user.is_staff && !data.user.is_superuser) {
+          throw new Error("Administrative access required.");
+        }
         onLogin(data.user, data.token);
       } else {
         const data = await apiClient.register(formData);
@@ -31,142 +34,71 @@ const AuthPage: React.FC<AuthPageProps> = ({ onLogin }) => {
       }
       navigate('/');
     } catch (err: any) {
-      console.error(err);
-      let message = 'Authentication failed.';
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        message = 'Invalid email or password.';
-      } else if (err.code === 'auth/email-already-in-use') {
-        message = 'This email is already registered.';
-      } else {
-        message = err.message || message;
-      }
-      setError(message);
+      setError(err.message || 'Authentication failed.');
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="min-h-[80vh] flex items-center justify-center px-4">
-      <div className="w-full max-w-md bg-slate-900 border border-slate-800 p-8 rounded-[2.5rem] shadow-2xl transition-all duration-500">
-        <div className="text-center mb-10">
-          <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-xl transition-all duration-500 ${isAdminMode ? 'bg-amber-600 shadow-amber-600/20' : 'bg-rose-600 shadow-rose-600/20'}`}>
-            {isAdminMode ? <Key className="w-8 h-8 text-white" /> : <ShieldCheck className="w-8 h-8 text-white" />}
+    <div className="min-h-[70vh] flex items-center justify-center p-4">
+      <div className="w-full max-w-sm bg-slate-900 border border-slate-800 p-8 rounded-2xl shadow-xl">
+        <div className="text-center mb-8">
+          <div className={`w-14 h-14 rounded-xl flex items-center justify-center mx-auto mb-4 ${isStaffMode ? 'bg-amber-600' : 'bg-rose-600'}`}>
+            {isStaffMode ? <Key className="text-white w-6 h-6" /> : <ShieldCheck className="text-white w-6 h-6" />}
           </div>
-          <h2 className="text-3xl font-black text-white uppercase tracking-tighter">
-            {isLogin ? 'Welcome Back' : isAdminMode ? 'Master Setup' : 'Create Account'}
+          <h2 className="text-xl font-bold text-white">
+            {isLogin ? (isStaffMode ? 'Admin Portal' : 'Login') : 'Register'}
           </h2>
-          <p className="text-slate-500 mt-2">
-            {isAdminMode ? 'Registering as System Administrator' : 'Access your tickets with Firebase Secure Auth'}
-          </p>
+          <p className="text-slate-500 text-xs mt-1">CineQuest Secure Authentication</p>
         </div>
 
         {error && (
-          <div className="mb-6 p-4 bg-rose-500/10 border border-rose-500/50 rounded-xl text-rose-500 text-sm font-medium">
+          <div className="mb-4 p-3 bg-rose-500/10 border border-rose-500/30 rounded-lg text-rose-500 text-[10px] font-bold uppercase">
             {error}
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {!isLogin && (
-            <div className="relative">
-              <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 w-5 h-5" />
-              <input
-                type="text"
-                placeholder="Username"
-                required
-                className="w-full bg-slate-800 border border-slate-700 rounded-2xl py-4 pl-12 pr-4 text-white focus:ring-2 focus:ring-rose-500 outline-none transition-all"
-                value={formData.username}
-                onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-              />
-            </div>
+            <AuthInput icon={<User className="w-4 h-4" />} placeholder="Full Name" value={formData.username} onChange={v => setFormData({...formData, username: v})} />
           )}
+          <AuthInput type="email" icon={<Mail className="w-4 h-4" />} placeholder="Email Address" value={formData.email} onChange={v => setFormData({...formData, email: v})} />
+          <AuthInput type="password" icon={<Lock className="w-4 h-4" />} placeholder="Password" value={formData.password} onChange={v => setFormData({...formData, password: v})} />
 
-          <div className="relative">
-            <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 w-5 h-5" />
-            <input
-              type="email"
-              placeholder="Email Address"
-              required
-              className="w-full bg-slate-800 border border-slate-700 rounded-2xl py-4 pl-12 pr-4 text-white focus:ring-2 focus:ring-rose-500 outline-none transition-all"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-            />
-          </div>
-
-          <div className="relative">
-            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 w-5 h-5" />
-            <input
-              type="password"
-              placeholder="Password"
-              required
-              className="w-full bg-slate-800 border border-slate-700 rounded-2xl py-4 pl-12 pr-4 text-white focus:ring-2 focus:ring-rose-500 outline-none transition-all"
-              value={formData.password}
-              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-            />
-          </div>
-
-          {!isLogin && isAdminMode && (
-            <div className="relative animate-in slide-in-from-top-2 duration-300">
-              <Key className="absolute left-4 top-1/2 -translate-y-1/2 text-amber-500 w-5 h-5" />
-              <input
-                type="password"
-                placeholder="Secret Admin Key"
-                className="w-full bg-amber-600/5 border border-amber-600/30 rounded-2xl py-4 pl-12 pr-4 text-white focus:ring-2 focus:ring-amber-500 outline-none transition-all"
-                value={formData.adminKey}
-                onChange={(e) => setFormData({ ...formData, adminKey: e.target.value })}
-              />
-            </div>
+          {!isLogin && isStaffMode && (
+            <AuthInput type="password" icon={<Key className="w-4 h-4 text-amber-500" />} placeholder="Secret Master Key" value={formData.adminKey} onChange={v => setFormData({...formData, adminKey: v})} />
           )}
 
           <button
             type="submit"
             disabled={isLoading}
-            className={`w-full py-4 font-black rounded-2xl flex items-center justify-center gap-2 transition-all shadow-xl ${isAdminMode ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-600/20' : 'bg-rose-600 hover:bg-rose-500 shadow-rose-600/20'} text-white`}
+            className={`w-full py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 text-white transition-all ${isStaffMode ? 'bg-amber-600 hover:bg-amber-500' : 'bg-rose-600 hover:bg-rose-500'}`}
           >
-            {isLoading ? (
-              <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
-            ) : (
-              <>
-                {isLogin ? 'SIGN IN' : 'CREATE ACCOUNT'} <ArrowRight className="w-5 h-5" />
-              </>
-            )}
+            {isLoading ? <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" /> : <>Continue <ArrowRight className="w-4 h-4" /></>}
           </button>
         </form>
 
-        {!isLogin && (
-          <div className="mt-4 flex items-center justify-center">
-            <button 
-              onClick={() => setIsAdminMode(!isAdminMode)}
-              className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-600 hover:text-amber-500 transition-colors"
-            >
-              {isAdminMode ? 'Register as regular user' : 'Register as Master Admin'}
-            </button>
-          </div>
-        )}
-
-        <div className="mt-8 pt-8 border-t border-slate-800 text-center">
-          <button
-            onClick={() => {
-              setIsLogin(!isLogin);
-              setIsAdminMode(false);
-            }}
-            className="text-slate-400 hover:text-white font-bold transition-colors"
-          >
-            {isLogin ? (
-              <span className="flex items-center justify-center gap-2">
-                New to CineQuest? <span className="text-rose-500">Create an account</span>
-              </span>
-            ) : (
-              <span className="flex items-center justify-center gap-2">
-                Already have an account? <span className="text-rose-500">Sign In</span>
-              </span>
-            )}
+        <div className="mt-8 pt-6 border-t border-slate-800 flex flex-col gap-3">
+          <button onClick={() => setIsStaffMode(!isStaffMode)} className="text-[10px] font-bold text-slate-500 hover:text-white uppercase tracking-wider text-center">
+            {isStaffMode ? 'Login as standard user' : 'Switch to Staff Portal'}
+          </button>
+          <button onClick={() => setIsLogin(!isLogin)} className="text-xs text-rose-500 font-bold text-center">
+            {isLogin ? "Don't have an account? Sign up" : 'Already registered? Login'}
           </button>
         </div>
       </div>
     </div>
   );
 };
+
+const AuthInput: React.FC<{ icon: any, placeholder: string, value: string, onChange: (v: string) => void, type?: string }> = ({ icon, placeholder, value, onChange, type = "text" }) => (
+  <div className="relative group">
+    <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-white transition-colors">
+      {icon}
+    </div>
+    <input type={type} required placeholder={placeholder} className="w-full bg-slate-800 border border-slate-700 rounded-lg py-2.5 pl-10 pr-4 text-sm text-white focus:ring-1 focus:ring-slate-500 outline-none transition-all placeholder:text-slate-600" value={value} onChange={e => onChange(e.target.value)} />
+  </div>
+);
 
 export default AuthPage;

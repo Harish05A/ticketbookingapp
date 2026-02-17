@@ -16,12 +16,28 @@ export interface Movie {
   releaseDate: string;
 }
 
+export interface TheaterLayout {
+  rows: string[]; // e.g., ['A', 'B', 'C', 'D']
+  cols: number;   // e.g., 10
+}
+
 export interface Theater {
   id: string;
   name: string;
   city: string;
   screens: string[];
+  layout: TheaterLayout;
 }
+
+export type SeatStatus = 'available' | 'booked' | 'selected';
+
+export interface HeldSeat {
+  status: 'held';
+  heldBy: string;
+  expiresAt: number;
+}
+
+export type SeatState = SeatStatus | HeldSeat;
 
 export interface Show {
   id: string;
@@ -29,7 +45,7 @@ export interface Show {
   theaterId: string;
   time: string;
   price: number;
-  seats: Record<string, 'available' | 'booked' | 'selected'>;
+  seats: Record<string, SeatState>;
   theater_name?: string;
 }
 

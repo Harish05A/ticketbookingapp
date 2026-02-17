@@ -39,23 +39,24 @@ export const INITIAL_THEATERS: Theater[] = [
     id: 't1',
     name: 'PVR Phoenix',
     city: 'Lucknow',
-    screens: ['Screen 1', 'Screen 2']
+    screens: ['Screen 1', 'Screen 2'],
+    layout: { rows: ['A', 'B', 'C', 'D', 'E', 'F'], cols: 8 }
   },
   {
     id: 't2',
     name: 'Inox Riverside',
     city: 'Kanpur',
-    screens: ['Main Hall', 'Gold Class']
+    screens: ['Main Hall', 'Gold Class'],
+    layout: { rows: ['A', 'B', 'C'], cols: 4 } // Smaller Gold class layout
   }
 ];
 
-// Helper to generate a 5x5 grid of seats
-export const generateSeats = () => {
+// Helper to generate a dynamic grid of seats
+export const generateSeats = (rows: string[] = ['A', 'B', 'C', 'D', 'E'], cols: number = 5) => {
   const seats: Record<string, 'available' | 'booked'> = {};
-  const rows = ['A', 'B', 'C', 'D', 'E'];
   for (const row of rows) {
-    for (let i = 1; i <= 5; i++) {
-      const isBooked = Math.random() < 0.2;
+    for (let i = 1; i <= cols; i++) {
+      const isBooked = Math.random() < 0.15;
       seats[`${row}${i}`] = isBooked ? 'booked' : 'available';
     }
   }
@@ -63,9 +64,9 @@ export const generateSeats = () => {
 };
 
 export const INITIAL_SHOWS: Show[] = [
-  { id: 's1', movieId: 'm1', theaterId: 't1', time: '10:00 AM', price: 250, seats: generateSeats() },
-  { id: 's2', movieId: 'm1', theaterId: 't1', time: '01:30 PM', price: 300, seats: generateSeats() },
-  { id: 's3', movieId: 'm2', theaterId: 't1', time: '05:00 PM', price: 350, seats: generateSeats() },
-  { id: 's4', movieId: 'm3', theaterId: 't2', time: '08:00 PM', price: 400, seats: generateSeats() },
-  { id: 's5', movieId: 'm2', theaterId: 't2', time: '11:00 AM', price: 280, seats: generateSeats() },
+  { id: 's1', movieId: 'm1', theaterId: 't1', time: '10:00 AM', price: 250, seats: generateSeats(INITIAL_THEATERS[0].layout.rows, INITIAL_THEATERS[0].layout.cols) },
+  { id: 's2', movieId: 'm1', theaterId: 't1', time: '01:30 PM', price: 300, seats: generateSeats(INITIAL_THEATERS[0].layout.rows, INITIAL_THEATERS[0].layout.cols) },
+  { id: 's3', movieId: 'm2', theaterId: 't1', time: '05:00 PM', price: 350, seats: generateSeats(INITIAL_THEATERS[0].layout.rows, INITIAL_THEATERS[0].layout.cols) },
+  { id: 's4', movieId: 'm3', theaterId: 't2', time: '08:00 PM', price: 400, seats: generateSeats(INITIAL_THEATERS[1].layout.rows, INITIAL_THEATERS[1].layout.cols) },
+  { id: 's5', movieId: 'm2', theaterId: 't2', time: '11:00 AM', price: 280, seats: generateSeats(INITIAL_THEATERS[1].layout.rows, INITIAL_THEATERS[1].layout.cols) },
 ];

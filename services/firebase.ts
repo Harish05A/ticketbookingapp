@@ -3,7 +3,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebas
 import { getFirestore } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
-const firebaseConfig = {
+export const firebaseConfig = {
   apiKey: "AIzaSyBXvvy-gl0uFy0eo_niXeZyLb5FjEpX74k",
   authDomain: "ticketbooking-59a4e.firebaseapp.com",
   projectId: "ticketbooking-59a4e",
