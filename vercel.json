@@ -3,20 +3,23 @@
   "version": 2,
   "builds": [
     {
-      "src": "index.tsx",
-      "use": "@vercel/static-build",
-      "config": { "distDir": "dist" }
+      "src": "package.json",
+      "use": "@vercel/static-build"
     },
     {
       "src": "backend/moviebooking/wsgi.py",
       "use": "@vercel/python",
-      "config": { "maxDuration": 10 }
+      "config": { "runtime": "python3.9" }
     }
   ],
   "routes": [
     {
       "src": "/api/(.*)",
       "dest": "backend/moviebooking/wsgi.py"
+    },
+    {
+      "src": "/assets/(.*)",
+      "dest": "/assets/$1"
     },
     {
       "src": "/(.*)",
